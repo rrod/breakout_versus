@@ -1,0 +1,535 @@
+<html></html>
+
+<script src="keyboard_input.js"></script>
+<script>
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// NEED TO ENSURE THAT BOTH PLAYERS ARE IN THE SAME GAME SESSION
+function get_session_id(){
+  var request = new XMLHttpRequest();
+  request.open("GET", "/get_session_id", true);
+
+  request.onload = function(){
+    session_id = request.response;
+  }
+
+  request.send();
+}
+
+// wait in loading lobby to get session ids and players
+// send msg to server that you are looking for a game
+function get_looking_for_game(){
+  var request = new XMLHttpRequest();
+  request.open("GET", "/get_looking_for_game", true);
+
+  // request.onload = function(){
+  //   session_id = request.response;
+  // }
+
+  request.send();
+}
+
+// get a session id if a game is available
+
+// if session id's match then game loads
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+document.title = "BREAKOUT VERSUS";
+
+var player_1_coord_x = 10;
+var player_1_coord_y = (document.body.clientHeight / 2) - 50;
+
+var player_character_width = 50;
+var player_character_height = 100;
+
+var player_2_coord_x = (document.body.clientWidth - player_character_width - 10);
+var player_2_coord_y = (document.body.clientHeight / 2) - 50;
+
+var ping_loc_x = 0;
+var ping_loc_y = Math.floor((Math.random() * document.body.clientHeight) + 0);
+
+var bots_enabled = 0; // ENABLE AN OPTION TO PLAY AGAINST BOTS (ESP IF NO ONE ELSE IS PLAYING)
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var status_window = document.createElement('div');
+  status_window.id = "status_window";
+  status_window.style.position = "absolute";
+  status_window.style.top = 0;
+  status_window.style.left = 0;
+  status_window.style.background = "#FFF";
+  status_window.style.zIndex = 10;
+  document.body.appendChild(status_window);
+
+var session_id;
+function update_status_window(){
+  document.getElementById("status_window").innerHTML = "\
+  Collision: " + collision + "<br>\
+  Collision (server): " + collision_server + "<br>\
+  Direction: " + player_1_ball_direction + "<br>\
+  X-value: " + player_1_ball_x2 + "<br>\
+  Y-value: " + player_1_ball_y2 + "<br>\
+  Session ID: " + session_id + "\
+  ";
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var initial_game_data = [];
+function submit_initial_game_data(){
+  var request = new XMLHttpRequest();
+  request.open("POST", "/get_initial_game_data", true);
+
+  initial_game_data[0] = player_1_coord_y;
+  initial_game_data[1] = player_1_ball_direction;
+  initial_game_data[2] = player_1_ball_x;
+  initial_game_data[3] = player_1_ball_y;
+  initial_game_data[4] = collision;
+
+  request.send(initial_game_data); // request the position wanted
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function player_1_collision_detection(ping_x, ping_y){
+  if ((ping_x >= player_1_coord_x) && (ping_x <= player_1_coord_x + player_character_width) &&
+      (ping_y >= player_1_coord_y) && (ping_y <= player_1_coord_y + player_character_height)){
+
+    // player_1_ball_direction = 0;
+    update_ball_direction();
+
+    random_direction();
+  }
+
+  // get ball location on server
+
+  // TOO MANY AJAX REQUESTS...MAKE IT SO THAT IT SENDS AS FEW AS POSSIBLE...MAYBE EVEN JUST 1 REQUEST...A FAT ARRAY??? MIGHT BE TOO MUCH BANDWIDTH...
+  var request = new XMLHttpRequest();
+  request.open("POST", "/player_1_collision_detection", true);
+
+  request.onload = function(){
+    // player_1_ball_direction = parseInt(request.response); // update the position from the server's value
+  }
+
+  // do the direction first
+  // request.send(player_1_ball_direction);
+  if (player_1_ball_direction === 0){ request.send(1); }
+  if (player_1_ball_direction === 1){ request.send(0); }
+}
+
+function player_2_collision_detection(ping_x, ping_y){
+  if ((ping_x >= player_2_coord_x) && (ping_x <= player_2_coord_x + player_character_width) &&
+      (ping_y >= player_2_coord_y) && (ping_y <= player_2_coord_y + player_character_height)){
+
+    // player_1_ball_direction = 1;
+    update_ball_direction();
+
+    random_direction();
+  }
+}
+
+function block_collision_detection(ping_x, ping_y){
+  for (var i = 0, length_1 = num_blocks_x; i < length_1; i++){
+    for (var j = 0, length_2 = num_blocks_y; j < length_2; j++){
+        if ((ping_x >= block_border[i][j][0]) && (ping_x <= block_border[i][j][0] + player_character_width) &&
+            (ping_y >= block_border[i][j][1]) && (ping_y <= block_border[i][j][1] + player_character_height)){
+
+          // bounce ball
+          // player_1_ball_direction = 1;
+          update_ball_direction();
+
+          // destroy block
+          skipped_block[i][j] = 1;
+
+          random_direction();
+        }
+    }
+  }
+}
+
+function border_collision_detection(ping_x, ping_y){
+  if (ping_x <= 0){
+    player_1_ball_x = -100;
+    player_1_ball_y = -100;
+  }
+
+  if (ping_x >= document.body.clientWidth){
+    player_1_ball_x = -100;
+    player_1_ball_y = -100;
+  }
+
+  if (ping_y <= 0){
+    // change_angle(); // disabled cuz causes it to hang cuz y = -100 when it goes off screen, which causes an infinite call to change_angle(), thus hanging
+  }
+
+  if (ping_y >= document.body.clientHeight){
+    change_angle();
+  }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function random_direction(){
+  change_angle();
+}
+
+var collision = 0;
+var collision_server = 0;
+function change_angle(){
+  // if (collision === 0){
+  //   collision = 1
+  // }else{
+  //   collision = 0;
+  // }
+
+  // WHAT DOES CHANGE VARIABLE DO??? - IT MAKES IT SO THE BALL CHANGES ITS 'ANGLE' RANDOMLY
+  // send server request for change variable
+  // if server says change_server >= 2, then it also does the collision_server
+  // else it does nothing ?????
+  var change = Math.floor(Math.random() * 3);
+  if (change >= 2){
+    //change_angle();
+    var request = new XMLHttpRequest();
+    request.open("POST", "/player_1_ball_collision", true);
+
+    request.onload = function(){
+      collision = parseInt(request.response);
+      collision_server = parseInt(request.response);
+    }
+
+    request.send(collision);
+  }else{}
+
+
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// need to send more than the direction...need to send the X and Y of the ball in an array with the direction
+var player_1_ball_location = [];
+var player_1_ball_x2 = 0;
+var player_1_ball_y2 = 0;
+function update_ball_location(){
+  var request = new XMLHttpRequest();
+  request.open("POST", "/player_1_ball_location", true);
+
+  player_1_ball_location[0] = player_1_ball_x;
+  player_1_ball_location[1] = player_1_ball_y;
+
+  request.onload = function(){
+    var data2 = JSON.parse("[" + request.response + "]");
+    player_1_ball_x2 = data2[0];//parseInt(data2[0]);
+    player_1_ball_y2 = data2[1];//parseInt(data2[1]);
+  }
+
+  request.send(player_1_ball_location);
+}
+
+function update_ball_direction(){
+  var request = new XMLHttpRequest();
+  request.open("POST", "/player_1_ball_data", true);
+
+  request.onload = function(){
+    player_1_ball_direction = parseInt(request.response); // update the position from the server's value
+  }
+
+  // do the direction first
+  // request.send(player_1_ball_direction);
+  if (player_1_ball_direction === 0){ request.send(1); }
+  if (player_1_ball_direction === 1){ request.send(0); }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var block_width = 50;
+var block_height = 100;
+var block_color = "#0AF";
+
+var num_blocks_x = 3;
+var num_blocks_y = Math.floor(document.body.clientHeight / block_height);
+var block = [];
+var block_border = [];
+
+var skipped_block = [];
+function create_skipped_blocks(){
+  for (var i = 0, length_1 = num_blocks_x; i < length_1; i++){
+    skipped_block[i] = [];
+    for (var j = 0, length_2 = num_blocks_y; j < length_2; j++){
+      skipped_block[i][j] = 0;
+    }
+  }
+}
+
+var block_x = (document.body.clientWidth / 2) - (block_width * (num_blocks_x / 2));
+var block_y = 1;
+
+function generate_blocks(){
+  var create_block = document.getElementById("create_new_map");
+
+  for (var i = 0, length_1 = num_blocks_x; i < length_1; i++){
+    block[i] = [];
+    block_border[i] = [];
+    for (var j = 0, length_2 = num_blocks_y; j < length_2; j++){
+      if (skipped_block[i][j] === 1){
+        block_border[i][j] = [0,0];
+      }else{
+        block[i][j] = create_block.getContext("2d");
+        block[i][j].beginPath();
+        block[i][j].rect(
+          block_x + (i * block_width),
+          block_y + (j * block_height),
+          block_width,
+          block_height
+        );
+
+        var colors = ["#024", "#420", "#240"];
+        block[i][j].fillStyle = colors[0];//colors[Math.floor(Math.random() * 3)];
+        block[i][j].fill();
+
+        block[i][j].strokeStyle = block_color;
+        block[i][j].stroke();
+        block[i][j].closePath();
+
+        block_border[i][j] = [block_x + (i * block_width), block_y + (j * block_height)];
+      }
+    }
+  }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var player_1_ball_x = player_1_coord_x + player_character_width + 10;
+var player_1_ball_y = player_1_coord_y + (player_character_height / 2);
+var player_1_ball_color = "#FFF";
+var player_1_ball_x_speed = 15;
+var player_1_ball_size = 20;
+
+function generate_player_1_ball(){
+  var create_ping_character = document.getElementById("create_new_map");
+    ping_character = create_ping_character.getContext("2d");
+    ping_character.beginPath();
+    ping_character.rect(
+      player_1_ball_x,
+      player_1_ball_y,
+      player_1_ball_size,
+      player_1_ball_size
+    );
+    ping_character.fillStyle = player_1_ball_color;
+    ping_character.fill();
+    ping_character.strokeStyle = player_1_ball_color;
+    ping_character.stroke();
+    ping_character.closePath();
+}
+
+
+var player_1_ball_direction = 0;
+function move_player_1_ball(ping_x,ping_y,direction,angle){
+  if (player_1_ball_x >= document.getElementById("create_new_map").width){
+    //player_1_ball_x = 0; // reset the balls
+    winner(1);
+  }
+
+  if (player_1_ball_direction === 0){
+    player_1_ball_x += player_1_ball_x_speed;
+  } else{
+    player_1_ball_x -= player_1_ball_x_speed;
+  }
+
+  if (collision === 0){
+    player_1_ball_y += 1;
+  }else{
+    player_1_ball_y -= 1;
+  }
+}
+
+// function move_player_character2222(value){
+//   var request = new XMLHttpRequest();
+//   request.open("POST", "/player_1_move", true);
+//
+//   request.onload = function(){
+//     player_1_coord_y = parseInt(request.response); // update the position from the server's value
+//   }
+//
+//   // request the position wanted
+//   if (value === "up"){ request.send(-change_player_y_position); } // subtract 15 from the y-value
+//   if (value === "down"){ request.send(change_player_y_position); } // add 15 to the y-value
+// }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function generate_new_map(){
+  var create_new_map = document.createElement("canvas");
+    create_new_map.id = "create_new_map";
+    create_new_map.style.position = "absolute";
+    create_new_map.style.top = 0;
+    create_new_map.style.left = 0;
+    create_new_map.width = document.body.clientWidth;
+    create_new_map.height = document.body.clientHeight;
+    create_new_map.style.background = "#000";
+    document.body.appendChild(create_new_map);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var player_1_border_color = "#00F"
+var player_1_fill_color = "#003";
+function generate_new_player_character(coord_x, coord_y){
+  var create_player_character = document.getElementById("create_new_map");
+    player_character = create_player_character.getContext("2d");
+    player_character.beginPath();
+    player_character.rect(coord_x,coord_y,player_character_width,player_character_height);
+    player_character.fillStyle = player_1_fill_color;
+    player_character.fill();
+    player_character.strokeStyle = player_1_border_color;
+    player_character.stroke();
+    player_character.closePath();
+}
+
+var player_2_border_color = "#F00"
+var player_2_fill_color = "#300";
+function generate_new_enemy_character(coord_x, coord_y){
+  var create_enemy_character = document.getElementById("create_new_map");
+    enemy_character = create_enemy_character.getContext("2d");
+    enemy_character.beginPath();
+    enemy_character.rect(coord_x,coord_y,player_character_width,player_character_height);
+    enemy_character.fillStyle = player_2_fill_color;
+    enemy_character.fill();
+    enemy_character.strokeStyle = player_2_border_color;
+    enemy_character.stroke();
+    enemy_character.closePath();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var change_player_y_position = 15;
+function move_player_character(value){
+  var request = new XMLHttpRequest();
+  request.open("POST", "/player_1_move", true);
+
+  request.onload = function(){
+    player_1_coord_y = parseInt(request.response); // update the position from the server's value
+  }
+
+  // request the position wanted
+  if (value === "up"){ request.send(-change_player_y_position); } // subtract 15 from the y-value
+  if (value === "down"){ request.send(change_player_y_position); } // add 15 to the y-value
+}
+
+function move_player_2_character(value){
+  if (value === "up"){ player_2_coord_y = player_2_coord_y - change_player_y_position; }
+  if (value === "down"){ player_2_coord_y = player_2_coord_y + change_player_y_position; }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function winner(value){
+  if (winner === 1){
+    // player 1 wins
+  }
+
+  if (winner === 2){
+    // player 2 wins
+  }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function clear_screen(){
+  var canvas = document.getElementById("create_new_map");
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  canvas.getContext("2d").beginPath(); // clears any drawn lines
+
+  // resize the canvas to fit the window no matter its shape
+  document.getElementById("create_new_map").width = document.body.clientWidth;
+  document.getElementById("create_new_map").height = document.body.clientHeight;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+function main_program_loop(){
+  clear_screen();
+
+  generate_new_player_character(player_1_coord_x, player_1_coord_y);
+
+  generate_new_enemy_character(player_2_coord_x, player_2_coord_y);
+
+  generate_blocks();
+
+  generate_player_1_ball();
+  move_player_1_ball();
+  update_ball_location();
+
+  player_1_collision_detection(player_1_ball_x, player_1_ball_y);
+  player_2_collision_detection(player_1_ball_x, player_1_ball_y);
+
+  block_collision_detection(player_1_ball_x, player_1_ball_y);
+
+  border_collision_detection(player_1_ball_x, player_1_ball_y);
+
+  update_status_window();
+
+  requestAnimationFrame(main_program_loop);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+window.onload = function start_program(){
+  get_session_id();
+
+  get_keyboard_input();
+  generate_new_map();
+  create_skipped_blocks();
+
+  submit_initial_game_data();
+
+  main_program_loop();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+</script>
